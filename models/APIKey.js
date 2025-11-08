@@ -52,6 +52,14 @@ const apiKeySchema = new mongoose.Schema({
     type: Date,
     default: null // null means no expiration
   },
+  paidUntil: {
+    type: Date,
+    default: null // For subscription-based keys, tracks payment validity
+  },
+  subscriptionAmount: {
+    type: Number,
+    default: 0 // Amount paid for subscription (in lamports)
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -71,6 +79,17 @@ apiKeySchema.statics.generateKey = function() {
 apiKeySchema.methods.isExpired = function() {
   if (!this.expiresAt) return false;
   return new Date() > this.expiresAt;
+};
+
+// Method to check if subscription payment is current
+apiKeySchema.methods.isSubscriptionCurrent = function() {
+  if (!this.paidUntil) return true; // No subscription, always current
+  return new Date() <= this.paidUntil;
+};
+
+// Method to check if key is usable (active, not expired, subscription current)
+apiKeySchema.methods.isUsable = function() {
+  return this.isActive && !this.isExpired() && this.isSubscriptionCurrent();
 };
 
 // Method to update usage statistics

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import APIKey from '../models/APIKey.js';
+import paymentController from '../controllers/paymentController.js';
 
 // Middleware to verify JWT token (for authenticated routes like generating API keys)
 export const verifyToken = async (req, res, next) => {
@@ -84,6 +85,17 @@ export const verifyApiKey = async (req, res, next) => {
       });
     }
 
+    // Check if subscription payment is current
+    if (!keyDoc.isSubscriptionCurrent()) {
+      return res.status(402).json({
+        success: false,
+        error: 'API key subscription has expired. Please renew your subscription.',
+        subscriptionExpired: true,
+        paidUntil: keyDoc.paidUntil,
+        subscriptionAmount: keyDoc.subscriptionAmount
+      });
+    }
+
     // Check if user account is active
     if (!keyDoc.userId.isActive) {
       return res.status(401).json({
@@ -122,4 +134,108 @@ export const checkPermission = (permission) => {
     }
     next();
   };
+};
+
+// Middleware to verify x402 payment
+export const verifyX402Payment = async (req, res, next) => {
+  try {
+    // Check if x402 is enabled
+    const x402Enabled = process.env.X402_ENABLED === 'true';
+
+    if (!x402Enabled) {
+      // x402 not enabled, skip payment verification
+      return next();
+    }
+
+    // Check for X-PAYMENT header
+    const paymentHeader = req.headers['x-payment'];
+
+    if (!paymentHeader) {
+      // No payment provided, return 402 Payment Required
+      const paymentRequirements = paymentController.getPaymentRequirements();
+
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required',
+        paymentRequired: true,
+        x402: {
+          version: 1,
+          recipient: paymentRequirements.recipient,
+          amount: paymentRequirements.amount,
+          token: paymentRequirements.token,
+          network: paymentRequirements.network,
+          message: 'This endpoint requires payment. Please include a valid payment transaction in the X-PAYMENT header.'
+        }
+      });
+    }
+
+    // Parse payment header
+    let paymentData;
+    try {
+      paymentData = JSON.parse(paymentHeader);
+    } catch (parseError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid X-PAYMENT header format. Expected JSON.'
+      });
+    }
+
+    // Validate payment data structure
+    if (!paymentData.x402Version || !paymentData.scheme || !paymentData.network || !paymentData.payload) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid x402 payment structure. Missing required fields.'
+      });
+    }
+
+    if (!paymentData.payload.serializedTransaction) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing serialized transaction in payment payload.'
+      });
+    }
+
+    // Verify the payment
+    const endpoint = req.originalUrl || req.url;
+    const userId = req.user?._id || null;
+
+    const verificationResult = await paymentController.verifyPayment(
+      paymentData.payload.serializedTransaction,
+      endpoint,
+      userId
+    );
+
+    if (!verificationResult.success) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment verification failed',
+        details: verificationResult.error,
+        paymentRequired: true
+      });
+    }
+
+    // Attach payment info to request
+    req.payment = verificationResult.payment;
+
+    next();
+  } catch (error) {
+    console.error('x402 payment verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error during payment verification.'
+    });
+  }
+};
+
+// Optional: Middleware that allows either API key OR x402 payment
+export const verifyApiKeyOrPayment = async (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+
+  // If API key is provided, use standard API key verification
+  if (apiKey) {
+    return verifyApiKey(req, res, next);
+  }
+
+  // Otherwise, require x402 payment
+  return verifyX402Payment(req, res, next);
 };

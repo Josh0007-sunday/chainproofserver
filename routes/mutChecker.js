@@ -3,6 +3,7 @@ import { MUAlgorithm } from '../MUchecker/algo.js';
 import { TokenRiskScorer } from '../MUchecker/riskscore.js';
 import { JupiterChecker } from '../controllers/jupiterchecker.js';
 import { verifyApiKey, checkPermission } from '../middleware/auth.js';
+import { verifyX402WithRewardPool } from '../middleware/x402WithRewardPool.js';
 
 const router = express.Router();
 
@@ -76,9 +77,9 @@ router.post('/risk-score', async (req, res) => {
 /**
  * @route   POST /api/mu-checker/full-analysis
  * @desc    Get both classification and risk score in one call
- * @access  Public
+ * @access  Public (with x402 payment - 0.1 USDC goes to reward pool)
  */
-router.post('/full-analysis', async (req, res) => {
+router.post('/full-analysis', verifyX402WithRewardPool, async (req, res) => {
   try {
     const { tokenAddress } = req.body;
 

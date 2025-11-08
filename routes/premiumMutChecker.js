@@ -2,16 +2,19 @@ import express from 'express';
 import { MUAlgorithm } from '../MUchecker/algo.js';
 import { TokenRiskScorer } from '../MUchecker/riskscore.js';
 import { JupiterChecker } from '../controllers/jupiterchecker.js';
-import { verifyApiKey, checkPermission } from '../middleware/auth.js';
+import { verifyApiKey, verifyApiKeyOrPayment, checkPermission } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Use x402 payment or API key for authentication
+const authMiddleware = process.env.X402_ENABLED === 'true' ? verifyApiKeyOrPayment : verifyApiKey;
 
 /**
  * @route   POST /api/v1/mu-checker/analyze
  * @desc    Analyze token classification (MEME vs UTILITY)
- * @access  Private (requires API key with 'analyze' permission)
+ * @access  Private (requires API key with 'analyze' permission OR x402 payment)
  */
-router.post('/analyze', verifyApiKey, checkPermission('analyze'), async (req, res) => {
+router.post('/analyze', authMiddleware, checkPermission('analyze'), async (req, res) => {
   try {
     const { tokenAddress } = req.body;
 
@@ -28,7 +31,12 @@ router.post('/analyze', verifyApiKey, checkPermission('analyze'), async (req, re
     res.json({
       success: true,
       data: result,
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '500 requests per 15 minutes'
@@ -47,9 +55,9 @@ router.post('/analyze', verifyApiKey, checkPermission('analyze'), async (req, re
 /**
  * @route   POST /api/v1/mu-checker/risk-score
  * @desc    Calculate token risk score (SAFE, MODERATE, DANGER)
- * @access  Private (requires API key with 'riskScore' permission)
+ * @access  Private (requires API key with 'riskScore' permission OR x402 payment)
  */
-router.post('/risk-score', verifyApiKey, checkPermission('riskScore'), async (req, res) => {
+router.post('/risk-score', authMiddleware, checkPermission('riskScore'), async (req, res) => {
   try {
     const { tokenAddress } = req.body;
 
@@ -66,7 +74,12 @@ router.post('/risk-score', verifyApiKey, checkPermission('riskScore'), async (re
     res.json({
       success: true,
       data: result,
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '500 requests per 15 minutes'
@@ -85,9 +98,9 @@ router.post('/risk-score', verifyApiKey, checkPermission('riskScore'), async (re
 /**
  * @route   POST /api/v1/mu-checker/full-analysis
  * @desc    Get complete token analysis (classification + risk + Jupiter data)
- * @access  Private (requires API key with 'fullAnalysis' permission)
+ * @access  Private (requires API key with 'fullAnalysis' permission OR x402 payment)
  */
-router.post('/full-analysis', verifyApiKey, checkPermission('fullAnalysis'), async (req, res) => {
+router.post('/full-analysis', authMiddleware, checkPermission('fullAnalysis'), async (req, res) => {
   try {
     const { tokenAddress } = req.body;
 
@@ -117,7 +130,12 @@ router.post('/full-analysis', verifyApiKey, checkPermission('fullAnalysis'), asy
       tokenInfo: jupiterData?.tokenInfo || null,
       jupiterData: jupiterData || null,
       timestamp: new Date().toISOString(),
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '500 requests per 15 minutes'
@@ -136,9 +154,9 @@ router.post('/full-analysis', verifyApiKey, checkPermission('fullAnalysis'), asy
 /**
  * @route   POST /api/v1/mu-checker/batch-classify
  * @desc    Classify multiple tokens (max 10)
- * @access  Private (requires API key with 'batch' permission)
+ * @access  Private (requires API key with 'batch' permission OR x402 payment)
  */
-router.post('/batch-classify', verifyApiKey, checkPermission('batch'), async (req, res) => {
+router.post('/batch-classify', authMiddleware, checkPermission('batch'), async (req, res) => {
   try {
     const { tokenAddresses } = req.body;
 
@@ -188,7 +206,12 @@ router.post('/batch-classify', verifyApiKey, checkPermission('batch'), async (re
       success: true,
       count: results.length,
       results,
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '50 batch requests per 15 minutes'
@@ -207,9 +230,9 @@ router.post('/batch-classify', verifyApiKey, checkPermission('batch'), async (re
 /**
  * @route   POST /api/v1/mu-checker/batch-risk
  * @desc    Calculate risk scores for multiple tokens (max 10)
- * @access  Private (requires API key with 'batch' permission)
+ * @access  Private (requires API key with 'batch' permission OR x402 payment)
  */
-router.post('/batch-risk', verifyApiKey, checkPermission('batch'), async (req, res) => {
+router.post('/batch-risk', authMiddleware, checkPermission('batch'), async (req, res) => {
   try {
     const { tokenAddresses } = req.body;
 
@@ -259,7 +282,12 @@ router.post('/batch-risk', verifyApiKey, checkPermission('batch'), async (req, r
       success: true,
       count: results.length,
       results,
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '50 batch requests per 15 minutes'
@@ -278,9 +306,9 @@ router.post('/batch-risk', verifyApiKey, checkPermission('batch'), async (req, r
 /**
  * @route   POST /api/v1/mu-checker/batch-full-analysis
  * @desc    Full analysis for multiple tokens (max 10)
- * @access  Private (requires API key with 'batch' permission)
+ * @access  Private (requires API key with 'batch' permission OR x402 payment)
  */
-router.post('/batch-full-analysis', verifyApiKey, checkPermission('batch'), async (req, res) => {
+router.post('/batch-full-analysis', authMiddleware, checkPermission('batch'), async (req, res) => {
   try {
     const { tokenAddresses } = req.body;
 
@@ -343,7 +371,12 @@ router.post('/batch-full-analysis', verifyApiKey, checkPermission('batch'), asyn
       count: results.length,
       results,
       timestamp: new Date().toISOString(),
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '50 batch requests per 15 minutes'
@@ -362,9 +395,9 @@ router.post('/batch-full-analysis', verifyApiKey, checkPermission('batch'), asyn
 /**
  * @route   POST /api/v1/mu-checker/prepare-registration
  * @desc    Analyze token and generate IPFS metadata for registration
- * @access  Private (requires API key with 'registration' permission)
+ * @access  Private (requires API key with 'registration' permission OR x402 payment)
  */
-router.post('/prepare-registration', verifyApiKey, checkPermission('registration'), async (req, res) => {
+router.post('/prepare-registration', authMiddleware, checkPermission('registration'), async (req, res) => {
   try {
     const { mintAddress, projectName, socials } = req.body;
 
@@ -407,7 +440,12 @@ router.post('/prepare-registration', verifyApiKey, checkPermission('registration
       success: true,
       message: 'Token analysis completed and metadata prepared',
       metadata,
-      apiKeyUsed: req.apiKey.name,
+      apiKeyUsed: req.apiKey?.name,
+      paymentUsed: req.payment ? {
+        transactionSignature: req.payment.transactionSignature,
+        amount: req.payment.amount,
+        status: req.payment.status
+      } : undefined,
       rateLimitInfo: {
         tier: 'premium',
         limit: '500 requests per 15 minutes'

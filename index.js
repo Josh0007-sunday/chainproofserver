@@ -7,6 +7,7 @@ import connectDB from './config/mongodb.js';
 import muCheckerRoutes from './routes/mutChecker.js';
 import premiumMuCheckerRoutes from './routes/premiumMutChecker.js';
 import authRoutes from './routes/auth.js';
+import chainproofRoutes from './routes/chainproof.js';
 
 // Import models to ensure they're registered with Mongoose
 import './models/User.js';
@@ -145,6 +146,7 @@ app.use('/api/v1/mu-checker/batch-full-analysis', premiumBatchLimiter);
 app.use('/auth', authRoutes);
 app.use('/api/mu-checker', muCheckerRoutes);
 app.use('/api/v1/mu-checker', premiumMuCheckerRoutes);
+app.use('/api/chainproof', chainproofRoutes);
 
 // Global health check
 app.get('/health', (req, res) => {

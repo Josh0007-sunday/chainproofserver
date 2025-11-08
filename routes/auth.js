@@ -2,7 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import APIKey from '../models/APIKey.js';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken, verifyX402Payment } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -159,8 +159,8 @@ router.post('/login', async (req, res) => {
 
 // @route   POST /auth/api-keys
 // @desc    Generate a new API key
-// @access  Private (requires JWT token)
-router.post('/api-keys', verifyToken, async (req, res) => {
+// @access  Private (requires JWT token OR x402 payment)
+router.post('/api-keys', verifyToken, async (req, res, next) => {
   try {
     const { name, permissions, expiresInDays } = req.body;
 
@@ -172,64 +172,99 @@ router.post('/api-keys', verifyToken, async (req, res) => {
       });
     }
 
-    // Check how many active keys the user has
-    const activeKeysCount = await APIKey.countDocuments({
+    // Check if user already has an API key (limit to 1 per user) BEFORE processing payment
+    const existingKey = await APIKey.findOne({
       userId: req.user._id,
       isActive: true
     });
 
-    if (activeKeysCount >= 10) {
+    if (existingKey) {
       return res.status(400).json({
         success: false,
-        error: 'Maximum limit of 10 active API keys reached. Please revoke unused keys.'
+        error: 'You already have an active API key. Each user is limited to one API key. Please revoke your existing key if you want to create a new one.',
+        existingKey: {
+          name: existingKey.name,
+          id: existingKey._id,
+          createdAt: existingKey.createdAt,
+          paidUntil: existingKey.paidUntil
+        }
       });
     }
 
-    // Generate unique API key
-    const key = APIKey.generateKey();
+    // Now verify payment (this happens AFTER checking for existing keys)
+    return verifyX402Payment(req, res, async () => {
+      try {
+        // Generate unique API key
+        const key = APIKey.generateKey();
 
-    // Calculate expiration date if provided
-    let expiresAt = null;
-    if (expiresInDays && expiresInDays > 0) {
-      expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + expiresInDays);
-    }
+        // Calculate expiration date if provided
+        let expiresAt = null;
+        if (expiresInDays && expiresInDays > 0) {
+          expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + expiresInDays);
+        }
 
-    // Create API key document
-    const apiKey = new APIKey({
-      key,
-      userId: req.user._id,
-      name,
-      permissions: permissions || {}, // Use provided permissions or defaults
-      expiresAt
-    });
+        // Set subscription details if paid with x402
+        let paidUntil = null;
+        let subscriptionAmount = 0;
 
-    await apiKey.save();
+        if (req.payment) {
+          // Payment was made, set paidUntil to 30 days from now
+          paidUntil = new Date();
+          paidUntil.setDate(paidUntil.getDate() + 30); // 1 month subscription
+          subscriptionAmount = req.payment.amount;
+        }
 
-    res.status(201).json({
-      success: true,
-      message: 'API key created successfully.',
-      data: {
-        apiKey: key, // Return the full key only once
-        name: apiKey.name,
-        id: apiKey._id,
-        permissions: apiKey.permissions,
-        expiresAt: apiKey.expiresAt,
-        createdAt: apiKey.createdAt
-      },
-      warning: 'Please save this API key securely. You will not be able to see it again.'
+        // Create API key document
+        const apiKey = new APIKey({
+          key,
+          userId: req.user._id,
+          name,
+          permissions: permissions || {}, // Use provided permissions or defaults
+          expiresAt,
+          paidUntil,
+          subscriptionAmount
+        });
+
+        await apiKey.save();
+
+        res.status(201).json({
+          success: true,
+          message: 'API key created successfully.',
+          data: {
+            apiKey: key, // Return the full key only once
+            name: apiKey.name,
+            id: apiKey._id,
+            permissions: apiKey.permissions,
+            expiresAt: apiKey.expiresAt,
+            createdAt: apiKey.createdAt
+          },
+          paymentUsed: req.payment ? {
+            transactionSignature: req.payment.transactionSignature,
+            amount: req.payment.amount,
+            status: req.payment.status
+          } : undefined,
+          warning: 'Please save this API key securely. You will not be able to see it again.'
+        });
+      } catch (error) {
+        console.error('API key generation error:', error);
+
+        if (error.name === 'ValidationError') {
+          const messages = Object.values(error.errors).map(err => err.message);
+          return res.status(400).json({
+            success: false,
+            error: messages.join(', ')
+          });
+        }
+
+        res.status(500).json({
+          success: false,
+          error: 'Server error during API key generation.'
+        });
+      }
     });
   } catch (error) {
-    console.error('API key generation error:', error);
-
-    if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        error: messages.join(', ')
-      });
-    }
-
+    console.error('API key route error:', error);
     res.status(500).json({
       success: false,
       error: 'Server error during API key generation.'
@@ -257,6 +292,8 @@ router.get('/api-keys', verifyToken, async (req, res) => {
       permissions: key.permissions,
       rateLimit: key.rateLimit,
       expiresAt: key.expiresAt,
+      paidUntil: key.paidUntil,
+      subscriptionAmount: key.subscriptionAmount,
       createdAt: key.createdAt,
       updatedAt: key.updatedAt
     }));
